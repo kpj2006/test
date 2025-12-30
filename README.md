@@ -8,3 +8,4 @@ test
 main
 
 check
+check 1
