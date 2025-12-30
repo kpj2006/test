@@ -9,3 +9,4 @@ main
 
 check
 check 1
+check 2
