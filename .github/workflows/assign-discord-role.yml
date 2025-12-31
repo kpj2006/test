@@ -1,0 +1,78 @@
+name: Assign Discord role from PR comment
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  pull-requests: read
+
+jobs:
+  assign:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate comment and extract Discord ID
+        id: extract
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Must be on a PR
+            if (!context.payload.issue.pull_request) {
+              return core.setFailed("Not a PR comment");
+            }
+
+            const { owner, repo } = context.repo;
+            const issueNumber = context.payload.issue.number;
+
+            // Fetch PR
+            const { data: pr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: issueNumber,
+            });
+
+            // Must be merged
+            if (!pr.merged) {
+              return core.setFailed("PR not merged");
+            }
+
+            // Only PR author allowed
+            const commenter = context.payload.comment.user.login;
+            if (commenter !== pr.user.login) {
+              return core.setFailed("Commenter is not PR author");
+            }
+
+            // Strict format
+            const body = context.payload.comment.body.trim();
+            const match = body.match(/^discord:\s*"?(\d{17,20})"?$/i);
+            if (!match) {
+              return core.setFailed("Invalid format");
+            }
+
+            core.setOutput("discord_user_id", match[1]);
+            core.setOutput("comment_id", context.payload.comment.id);
+
+      - name: Assign Discord role
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
+          DISCORD_ROLE_ID: ${{ secrets.DISCORD_ROLE_ID }}
+          DISCORD_USER_ID: ${{ steps.extract.outputs.discord_user_id }}
+        run: |
+          curl -f -X PUT \
+            -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+            https://discord.com/api/v10/guilds/$DISCORD_GUILD_ID/members/$DISCORD_USER_ID/roles/$DISCORD_ROLE_ID
+
+      # - name: Redact Discord ID comment (privacy)
+      #   uses: actions/github-script@v7
+      #   with:
+      #       script: |
+      #        await github.rest.issues.updateComment({
+      #         owner: context.repo.owner,
+      #         repo: context.repo.repo,
+      #         comment_id: Number('${{ steps.extract.outputs.comment_id }}'),
+      #          body: "[Discord ID removed after verification]"
+      #          });
+

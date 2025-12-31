@@ -1,0 +1,39 @@
+name: Ask for Discord ID after merge
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  ask:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Comment asking for Discord ID
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+
+            const body = [
+              "🎉 **PR merged!**",
+              "",
+              "To receive your Discord role, please comment **exactly**:",
+              "",
+              "```",
+              'discord: "YOUR_DISCORD_USER_ID"',
+              "```",
+              "",
+              "⚠️ Only the PR author’s comment will be accepted."
+            ].join("\n");
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body
+            });
