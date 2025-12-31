@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout contributor data repo
+      - name: Clone contributor data repo
         run: |
           git clone https://x-access-token:${{ github.token }}@github.com/kpj2006/team.git
 
@@ -33,18 +33,18 @@ jobs:
 
           if [ ! -f "$FILE" ]; then
             cat > "$FILE" <<EOF
-schema_version = 1
+          schema_version = 1
 
-[github]
-login = "$USER"
+          [github]
+          login = "$USER"
 
-stats.total_prs = 1
+          stats.total_prs = 1
 
-[[prs]]
-repo = "$REPO"
-pr_number = $PR_NUMBER
-merged_at = "$MERGED_AT"
-EOF
+          [[prs]]
+          repo = "$REPO"
+          pr_number = $PR_NUMBER
+          merged_at = "$MERGED_AT"
+          EOF
           else
             if grep -q "pr_number = $PR_NUMBER" "$FILE"; then
               echo "PR already recorded. Exiting."
@@ -57,11 +57,11 @@ EOF
 
             cat >> "$FILE" <<EOF
 
-[[prs]]
-repo = "$REPO"
-pr_number = $PR_NUMBER
-merged_at = "$MERGED_AT"
-EOF
+          [[prs]]
+          repo = "$REPO"
+          pr_number = $PR_NUMBER
+          merged_at = "$MERGED_AT"
+          EOF
           fi
 
       - name: Commit and push
