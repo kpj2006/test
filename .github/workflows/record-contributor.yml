@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Checkout contributor data repo
         run: |
-          git clone https://x-access-token:${{ github.token }}@github.com/ORG_NAME/org-contributor-data.git
+          git clone https://x-access-token:${{ github.token }}@github.com/kpj2006/team.git
 
       - name: Update contributor TOML
         run: |
