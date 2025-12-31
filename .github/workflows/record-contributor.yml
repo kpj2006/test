@@ -1,0 +1,76 @@
+name: Record contributor on PR merge
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  record:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout contributor data repo
+        run: |
+          git clone https://x-access-token:${{ github.token }}@github.com/ORG_NAME/org-contributor-data.git
+
+      - name: Update contributor TOML
+        run: |
+          set -e
+
+          cd org-contributor-data
+
+          USER="${{ github.event.pull_request.user.login }}"
+          REPO="${{ github.repository }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          MERGED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          FILE="users/$USER.toml"
+          mkdir -p users
+
+          if [ ! -f "$FILE" ]; then
+            cat > "$FILE" <<EOF
+schema_version = 1
+
+[github]
+login = "$USER"
+
+stats.total_prs = 1
+
+[[prs]]
+repo = "$REPO"
+pr_number = $PR_NUMBER
+merged_at = "$MERGED_AT"
+EOF
+          else
+            # Prevent double-counting
+            if grep -q "pr_number = $PR_NUMBER" "$FILE"; then
+              echo "PR already recorded. Exiting."
+              exit 0
+            fi
+
+            TOTAL=$(grep "stats.total_prs" "$FILE" | awk '{print $3}')
+            NEW_TOTAL=$((TOTAL + 1))
+            sed -i "s/stats.total_prs = $TOTAL/stats.total_prs = $NEW_TOTAL/" "$FILE"
+
+            cat >> "$FILE" <<EOF
+
+[[prs]]
+repo = "$REPO"
+pr_number = $PR_NUMBER
+merged_at = "$MERGED_AT"
+EOF
+          fi
+
+      - name: Commit and push
+        run: |
+          cd org-contributor-data
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add users/
+          git commit -m "Record PR #${{ github.event.pull_request.number }} by ${{ github.event.pull_request.user.login }}"
+          git push
