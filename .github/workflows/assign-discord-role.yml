@@ -65,12 +65,14 @@ jobs:
             -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
             https://discord.com/api/v10/guilds/$DISCORD_GUILD_ID/members/$DISCORD_USER_ID/roles/$DISCORD_ROLE_ID
 
-      - name: Delete Discord ID comment (privacy)
+      - name: Redact Discord ID comment (privacy)
         uses: actions/github-script@v7
         with:
-          script: |
-            await github.rest.issues.deleteComment({
+            script: |
+             await github.rest.issues.updateComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               comment_id: Number('${{ steps.extract.outputs.comment_id }}'),
-            });
+               body: "[Discord ID removed after verification]"
+               });
+
