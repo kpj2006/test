@@ -178,3 +178,144 @@ Same thundering-herd concern as the dependency section applies here at a larger 
 See: [`comment-prow.yaml`](https://github.com/kyverno/kyverno/blob/main/.github/workflows/comment-prow.yaml)
 
 Open questions for you to review: ["1. Open questions for maintainers — PR Hygiene"](https://github.com/kpj2006/test/blob/main/lfx-research-raw-pr-hygiene.md#1-open-questions-for-maintainers-pr-hygiene)
+
+---
+
+## 3. AI-Assisted PR Review & Enrichment (CodeRabbit)
+
+I discussed this with the maintainers directly on Slack, and they suggested to add CodeRabbit(my finding) to the proposal. So the question this section answers isn't whether to adopt it — it's which of its capabilities to turn on and how to configure them for Kyverno specifically. It ships its Pro-tier feature set free, with no time limit, on public repositories, so the real constraint below is the review rate cap, not cost — covered in §3.9.
+See: [CodeRabbit code review overview](https://docs.coderabbit.ai/guides/code-review-overview)
+
+### 3.1 PR summary
+
+We should remove the manual PR summary entirely — CodeRabbit generates one from the actual changes on every push. See: [PR summaries](https://docs.coderabbit.ai/pr-reviews/summaries)
+
+### 3.2 Walkthrough comment
+
+Covers file-by-file summary, related/duplicate issue and PR detection, and a review-effort estimate — no need to hand-maintain "Related issue." See: [Walkthroughs](https://docs.coderabbit.ai/pr-reviews/walkthroughs)
+
+### 3.3 Custom reviewer rules
+
+We can auto-suggest or auto-assign reviewers by condition instead of relying on CODEOWNERS alone. See: [Custom reviewer rules](https://docs.coderabbit.ai/pr-reviews/walkthroughs#custom-reviewer-rules)
+
+### 3.4 Change Stack
+
+Large PRs can be reviewed layer-by-layer instead of file-by-file — a feature I suggested to the CodeRabbit team directly. See: [Change Stack](https://docs.coderabbit.ai/pr-reviews/change-stack)
+
+### 3.5 Slop detection
+
+We can flag likely low-effort AI-generated PRs automatically, alongside the existing AI-disclosure checkbox in the PR template. See: [Slop detection](https://docs.coderabbit.ai/pr-reviews/slop-detection)
+
+### 3.6 Path-based and AST-grep instructions
+
+We can give CodeRabbit per-path review instructions, and later AST-grep rules for structural patterns. See: [Path instructions](https://docs.coderabbit.ai/configuration/path-instructions) and [AST-grep instructions](https://docs.coderabbit.ai/configuration/ast-grep-instructions)
+
+### 3.7 Review commands and issue creation
+
+CodeRabbit has its own comment commands, and can open issues directly from review findings. See: [Commands](https://docs.coderabbit.ai/guides/commands) and [Issue creation](https://docs.coderabbit.ai/issues/creation)
+
+### 3.8 Pre-merge checks
+
+We can add pre-merge checks for PR title, description, docstring coverage, and issue-claim accuracy, starting in warning mode. See: [Pre-merge checks](https://docs.coderabbit.ai/pr-reviews/pre-merge-checks)
+
+### 3.9 Post-merge actions
+
+We can auto-append changelog entries after merge instead of doing it by hand. See: [Post-merge actions](https://docs.coderabbit.ai/pr-reviews/post-merge-actions)
+
+### 3.10 Multi-repo analysis
+
+Kyverno's ecosystem spans multiple repos (policies, reports-server, SDKs) — CodeRabbit can link them and flag cross-repo breaking changes, though automatic linking needs Pro+. See: [Multi-repo analysis](https://docs.coderabbit.ai/knowledge-base/multi-repo-analysis)
+
+### 3.11 Issue enrichment
+
+CodeRabbit can auto-enrich issues with related code, potential solutions, and a complexity assessment. See: [Issue enrichment](https://docs.coderabbit.ai/issues/enrichment)
+
+### 3.12 Ready-made configs
+
+There are existing `.coderabbit.yaml` examples we can start from instead of writing one from scratch. See: [awesome-coderabbit configs](https://github.com/coderabbitai/awesome-coderabbit/tree/main/configs)
+
+### 3.13 Configuration inheritance
+
+Settings can be layered instead of duplicated per repo — worth using given Kyverno's multiple repos. See: [Configuration inheritance](https://docs.coderabbit.ai/configuration/configuration-inheritance)
+
+### 3.14 Review rate cap
+
+The real constraint is CodeRabbit's OSS review rate cap (1–10/hour by star count), not cost. See: [Plans and rate limits](https://docs.coderabbit.ai/management/plans)
+
+There are more tools beyond what's covered above — I didn't have time to explore all of them for this proposal. See: [Tools list](https://docs.coderabbit.ai/tools/list)
+
+Open questions for you to review: ["1. Open questions for maintainers — CodeRabbit"](https://github.com/kpj2006/test/blob/main/lfx-research-raw-coderabbit.md#1-open-questions-for-maintainers-coderabbit)
+
+---
+
+## 4. Scoped Test Selection
+
+### 4.1 Conformance is post-merge because pre-merge is too expensive
+
+`check-tests.yaml` triggers on `push` to `main`/`release-*` only — no `pull_request` trigger. On a PR, conformance is opt-in via a `/conformance` comment (`comment-conformance.yaml`). Why: `tests-conformance.yaml` has 55 top-level jobs, several sharded up to 12 ways (`generate`, `generating-policies`, `deleting-policies`), and `rbac` alone is matrixed 9 ways (3 configs × 3 k8s versions) — a full firing expands to several hundred runner-jobs. Across the 304 open PRs from §2.1, running that per PR isn't viable, so regressions land on `main` and surface only via the post-merge run: `.github/actions/workflow/failure-issue` auto-files an issue on failure, and there are 95 open issues carrying the `workflow-failure` label today.
+See: [`check-tests.yaml`](https://github.com/kyverno/kyverno/blob/main/.github/workflows/check-tests.yaml), [`tests-conformance.yaml`](https://github.com/kyverno/kyverno/blob/main/.github/workflows/tests-conformance.yaml), [`comment-conformance.yaml`](https://github.com/kyverno/kyverno/blob/main/.github/workflows/comment-conformance.yaml)
+
+**Today:**
+```mermaid
+flowchart LR
+    A[PR opens] --> B["Existing checks only —<br/>lint · unit tests · sha-pin"]
+    B --> C[Merges]
+    C --> D[Push to main]
+    D --> E["tests-conformance.yaml<br/>55 jobs, 100s of runners"]
+    E -- fails --> F["workflow-failure issue<br/>auto-filed on main"]
+
+    style D fill:#ffe9e9,stroke:#c00
+    style E fill:#ffe9e9,stroke:#c00
+    style F fill:#ffe9e9,stroke:#c00
+```
+
+**Proposed:**
+```mermaid
+flowchart LR
+    A[PR opens/updates] --> B["NEW: diff → suite mapping"]
+    B --> C["Scoped subset runs via existing<br/>tests-path/chainsaw-tests/shard-* inputs"]
+    C -- green --> D[Merge allowed]
+    C -- red --> E[Blocks, same as any other check]
+    D --> F["Full 55-job matrix still runs<br/>on push to main, as a safety net"]
+
+    style B fill:#e6f4ea,stroke:#137333
+    style C fill:#e6f4ea,stroke:#137333
+```
+
+The runner itself doesn't need building: `.github/actions/tests/conformance/run/action.yaml` already accepts `tests-path`, a `chainsaw-tests` regex, `shard-index`/`shard-count`, and `quarantined-tests` as inputs. What's missing is the "which suites does this diff need" logic that decides what to pass into those inputs.
+See: [`action.yaml`](https://github.com/kyverno/kyverno/blob/main/.github/actions/tests/conformance/run/action.yaml)
+
+### 4.2 The mapping layer: extend `.github/labels.yml`, don't add a parallel file
+
+`.github/labels.yml` (526 lines) already holds `rules: changed-files` globs per area, rendered by `pr-labelling.yaml` through `yq`/`jq` into an `actions/labeler` config at runtime. The clean move is a sibling key on the same entries, reusing that one source of truth instead of maintaining a second path map:
+
+```yaml
+area/engine:
+  rules:
+    - changed-files:
+        - any-glob-to-any-file: [pkg/engine/**]
+  suites: [assert, autogen, mutate, validate]   # NEW
+  unit: ["./pkg/engine/..."]                     # NEW
+```
+
+See: [`labels.yml`](https://github.com/kyverno/kyverno/blob/main/.github/labels.yml)
+
+### 4.3 One blind spot a path diff alone misses: the CEL policy CRDs live in a different repo
+
+`ValidatingPolicy`, `MutatingPolicy`, `GeneratingPolicy`, `DeletingPolicy`, and `ImageValidatingPolicy` aren't defined in this repo — they live in the external module `github.com/kyverno/api`, bumped roughly monthly. A selector that only reads `git diff --name-only` sees a `go.mod` change and nothing else, and would under-select — missing the entire CEL-policy conformance surface a version bump could actually affect. This needs an explicit rule, not an edge case discovered later: a `go.mod` diff touching any `github.com/kyverno/*` dependency maps to a hardcoded broad suite set, separate from the normal path lookup.
+
+### 4.4 Unit-test selection: a verified pipeline via Go's build graph
+
+Because the repo is a single Go module, a `go list -deps` reverse-dependency walk selects affected unit tests without per-module stitching. Run live against the repo: `pkg/engine` → 45 transitive dependents (41 with real `go test` targets); `pkg/cel/policies/vpol` → exactly 1 dependent (`pkg/webhooks/policy`); `pkg/webhooks/handlers` → 12 dependents; `pkg/image/verification` → 0, a leaf package. The same §4.3 caveat applies here too — an external-module bump needs the same override, not just the path-based lookup.
+Full pipeline and numbers: ["2. Unit-test selection via Go's build graph"](https://github.com/kpj2006/test/blob/main/lfx-research-raw-test-selection.md#2-unit-test-selection-via-gos-build-graph--full-verified-pipeline)
+
+### 4.5 Scoped selection needs to reach two suites it doesn't today
+
+Even the existing `/conformance` PR opt-in never reaches `tests-k6.yaml` (perf regression) or `tests-conformance-policy-library.yaml` (the external `kyverno/policies` repo's own chainsaw suite) — both are `workflow_call`-only, reachable exclusively from the push-triggered orchestrator. So today, even a maintainer who explicitly asks for conformance on a PR gets zero perf-regression and zero policy-library-compatibility signal pre-merge. Scoped selection needs to close this gap too, not just make the existing opt-in cheaper.
+See: [`tests-k6.yaml`](https://github.com/kyverno/kyverno/blob/main/.github/workflows/tests-k6.yaml) and [`tests-conformance-policy-library.yaml`](https://github.com/kyverno/kyverno/blob/main/.github/workflows/tests-conformance-policy-library.yaml)
+
+### 4.6 A concrete first PR: two conformance suites have been dead since a schema-lint chore
+
+`test/conformance/chainsaw/configs/` and `test/conformance/chainsaw/flags/standard/emit-events/` have zero `tests-path:` references anywhere in `.github/`, and are the only 2 of 52 suite roots with no `.chainsaw.yaml` file — they haven't actually run since at least the schema-lint commit that last touched them. A small CI check diffing the suite directories under `test/conformance/chainsaw` against every `tests-path:` value across the workflow YAML would catch this deterministically, no LLM required — a landable pre-mentorship PR alongside the other small fixes already flagged in §1.4.
+
+Open questions for you to review: ["1. Open questions for maintainers — Scoped Test Selection"](https://github.com/kpj2006/test/blob/main/lfx-research-raw-test-selection.md#1-open-questions-for-maintainers-scoped-test-selection)
