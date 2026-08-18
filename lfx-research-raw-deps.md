@@ -167,3 +167,4 @@ Raised rather than assumed, because #1 is a genuine conflict with a written poli
 3. What CVE severity should hard-block a merge versus just flag it for review?
 4. `.ko.yaml`'s base image (`ghcr.io/wolfi-dev/static:alpine`) is on a floating tag today, not a digest (see §8) — is pinning to digest wanted, or is that deliberate?
 5. Who may apply the kill-switch `hold` label — any maintainer, or a named role from `OWNERS.md`?
+6. [Kodiak](https://kodiakhq.com) (free for public repos) already does branch auto-update + auto-merge-on-green generically — is a custom, Kyverno-risk-tiered predicate worth building, or would maintainers rather adopt Kodiak and configure it?
