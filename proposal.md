@@ -242,6 +242,20 @@ Settings can be layered instead of duplicated per repo — worth using given Kyv
 
 The real constraint is CodeRabbit's OSS review rate cap (1–10/hour by star count), not cost. See: [Plans and rate limits](https://docs.coderabbit.ai/management/plans)
 
+### 3.15 Issue triage
+
+Kyverno's issue templates (`bug-cli.yaml`, `bug-webhook.yaml`, `bug-other.yaml`, `feature.yaml`) already pre-classify, so classification itself isn't the gap. Missing-info detection and enrichment — related code, potential solutions, complexity — can run through CodeRabbit instead of a custom triage agent. See: [Issue enrichment](https://docs.coderabbit.ai/issues/enrichment)
+
+Automated reproduction — spinning up a KinD cluster, applying the reported policy/resource, capturing actual vs. expected — is outside CodeRabbit's scope. The repro artifact should be a chainsaw test, not a log, built on the existing `make kind-create-cluster` / `.github/actions/tests/conformance/run` harness — that stays a separate, custom build.
+
+### 3.16 Slack/Discussions Q&A
+
+CodeRabbit has its own Slack agent — it answers grounded in the connected repo/docs and can open PRs directly from Slack. It doesn't document an explicit low-confidence escalation path, so a citation-mandatory, escalate-when-retrieval-is-weak rule on top of it still matters, not instead of it. See: [Slack agent](https://docs.coderabbit.ai/slack-agent)
+
+### 3.17 Flagging when docs need updating
+
+CodeRabbit's path instructions can flag that a `kyverno/website` doc PR is expected whenever specific paths change (CLI flags, CRD fields, Helm values) — the same nudge the PR template already asks for but nothing currently verifies. See: [Path instructions](https://docs.coderabbit.ai/configuration/path-instructions)
+
 There are more tools beyond what's covered above — I didn't have time to explore all of them for this proposal. See: [Tools list](https://docs.coderabbit.ai/tools/list)
 
 Open questions for you to review: ["1. Open questions for maintainers — CodeRabbit"](https://github.com/kpj2006/test/blob/main/lfx-research-raw-coderabbit.md#1-open-questions-for-maintainers-coderabbit)
@@ -319,3 +333,131 @@ See: [`tests-k6.yaml`](https://github.com/kyverno/kyverno/blob/main/.github/work
 `test/conformance/chainsaw/configs/` and `test/conformance/chainsaw/flags/standard/emit-events/` have zero `tests-path:` references anywhere in `.github/`, and are the only 2 of 52 suite roots with no `.chainsaw.yaml` file — they haven't actually run since at least the schema-lint commit that last touched them. A small CI check diffing the suite directories under `test/conformance/chainsaw` against every `tests-path:` value across the workflow YAML would catch this deterministically, no LLM required — a landable pre-mentorship PR alongside the other small fixes already flagged in §1.4.
 
 Open questions for you to review: ["1. Open questions for maintainers — Scoped Test Selection"](https://github.com/kpj2006/test/blob/main/lfx-research-raw-test-selection.md#1-open-questions-for-maintainers-scoped-test-selection)
+
+---
+
+## 5. Codegen & Verify Gate
+
+`check-codegen.yaml` already runs `make codegen-all-code` → `make verify-codegen` (and the same pair for docs) on every PR and push. On a mismatch it doesn't fail silently — it uploads a `codegen-code-patch`/`codegen-docs-patch` artifact and writes to the job summary: *"Download the codegen-code-patch artifact, then run `git apply codegen-code.patch` and commit the result."* That's a fully deterministic fix left for a human to download and apply by hand.
+See: [`check-codegen.yaml`](https://github.com/kyverno/kyverno/blob/main/.github/workflows/check-codegen.yaml)
+
+**Today:**
+```mermaid
+flowchart LR
+    A[PR touches api/] --> B["check-codegen.yaml runs<br/>make codegen-all-code + verify-codegen"]
+    B -- mismatch --> C["Uploads codegen-code-patch artifact<br/>+ job-summary instructions"]
+    C --> D[Human downloads, git apply, commits]
+
+    style C fill:#ffe9e9,stroke:#c00
+    style D fill:#ffe9e9,stroke:#c00
+```
+
+**Proposed:**
+```mermaid
+flowchart LR
+    A[PR touches api/] --> B["check-codegen.yaml runs<br/>make codegen-all-code + verify-codegen"]
+    B -- mismatch --> C["NEW: agent runs the same make targets<br/>and pushes a fixup commit to the PR branch"]
+    C --> D[Green on next run, no human step]
+
+    style C fill:#e6f4ea,stroke:#137333
+```
+
+This is one of the safer first agent actions: deterministic, fully reversible — it's just re-running a `make` target the human would've run anyway — and it closes a loop the workflow already does 90% of.
+
+Open questions for you to review: ["1. Open questions for maintainers — Codegen & Verify Gate"](https://github.com/kpj2006/test/blob/main/lfx-research-raw-codegen-gate.md#1-open-questions-for-maintainers-codegen--verify-gate)
+
+---
+
+## 6. Flaky Test Lifecycle & Maintainer Digest
+
+### 6.1 Quarantine already exists as a runtime patch, not a design gap
+
+Two suppression mechanisms coexist: 4 statically committed `skip: true` tests, and a dynamic `quarantined-tests` input that runs `yq eval '.spec.skip = true' -i` on matching `chainsaw-test.yaml` files at CI runtime, wired into `tests-conformance.yaml` for `applyconfiguration` and `sync-modify-downstream`. The git history explains why the dynamic version exists at all: PR #14199 deleted a flaky test outright, #14200 reverted that and landed a hardcoded skip instead, and #14570 — about a month later — introduced the `quarantined-tests` input specifically so nobody would have to hand-edit the workflow file again.
+See: [`tests-conformance.yaml`](https://github.com/kyverno/kyverno/blob/main/.github/workflows/tests-conformance.yaml), [#14570](https://github.com/kyverno/kyverno/pull/14570)
+
+### 6.2 There's no flakiness data to act on yet
+
+Chainsaw supports `--report-format`/`--report-path` upstream; Kyverno never passes either flag. So failures are visible only as raw stdout in the Action log, and nothing today can compute a flip rate because no machine-readable per-test result exists anywhere.
+
+**Today:**
+```mermaid
+flowchart LR
+    A[chainsaw test runs] --> B["No --report-format/--report-path"]
+    B --> C[Only raw stdout in Action log]
+    C --> D[No per-test history, no flip-rate signal]
+
+    style B fill:#ffe9e9,stroke:#c00
+    style D fill:#ffe9e9,stroke:#c00
+```
+
+**Proposed:**
+```mermaid
+flowchart LR
+    A["NEW: pass --report-format json<br/>--report-path to chainsaw"] --> B["NEW: ingest JUnit/JSON into<br/>a ci-metrics branch / GH Pages"]
+    B --> C[Compute flip rate per test]
+    C -- flip rate over threshold --> D["NEW: quarantine PR —<br/>owner + expiry, not just skip: true"]
+    D --> E[Nightly non-blocking re-run lane]
+    E -- N clean runs --> F[Auto de-quarantine]
+
+    style A fill:#e6f4ea,stroke:#137333
+    style B fill:#e6f4ea,stroke:#137333
+    style D fill:#e6f4ea,stroke:#137333
+    style F fill:#e6f4ea,stroke:#137333
+```
+
+Zero infra cost — a flat file in a branch or GitHub Pages is enough at this scale. The expiry matters as much as the quarantine itself: an owner and a date on the PR, not a skip that silently outlives whoever added it — which is exactly what happened to the 4 static `skip: true` tests already in the repo, none of which carry an explanatory comment or issue reference.
+
+### 6.3 The same data feeds a free weekly maintainer digest
+
+`.github/actions/workflow/failure-issue` already opens an issue on failure and closes it on the next green run, so the open→close interval of `workflow-failure` issues (95 open today) is itself a free flakiness time-series with zero new infrastructure. A weekly digest is just a week-over-week delta on that series, posted as a single pinned issue edited in place rather than re-posted each time.
+See: [`failure-issue/action.yaml`](https://github.com/kyverno/kyverno/blob/main/.github/actions/workflow/failure-issue/action.yaml)
+
+Open questions for you to review: ["1. Open questions for maintainers — Flaky Test Lifecycle & Maintainer Digest"](https://github.com/kpj2006/test/blob/main/lfx-research-raw-flaky-tests.md#1-open-questions-for-maintainers-flaky-test-lifecycle--maintainer-digest)
+
+---
+
+## 7. Smaller Automation Gaps
+
+### 7.1 DCO sign-off — the gap is just reactive guidance
+
+DCO is already enforced by the GitHub DCO App, and `.github/config.yml`'s `newPRWelcomeComment` already reminds first-time contributors to sign off; `AGENTS.md` even documents the recovery command. The only real gap is posting that exact command — `git rebase --signoff <base>` — the moment the DCO check actually fails, instead of leaving a contributor to go find it themselves.
+See: [`config.yml`](https://github.com/kyverno/kyverno/blob/main/.github/config.yml), [`AGENTS.md`](https://github.com/kyverno/kyverno/blob/main/AGENTS.md)
+
+### 7.2 Auto-backport already exists — the gap is conflict handling
+
+`/cherry-pick <branch>` (`comment-cherry-pick.yaml`) plus `cherry-pick-on-merge.yaml` already backport on request. The one real gap: a failed cherry-pick today just posts "check workflow logs" — no conflict summary, no draft PR left for a human to actually resolve.
+See: [`cherry-pick-on-merge.yaml`](https://github.com/kyverno/kyverno/blob/main/.github/workflows/cherry-pick-on-merge.yaml)
+
+### 7.3 Security advisory triage — a caution, not a build
+
+`VULN-TEMPLATE.md` and `SECURITY.md` already exist for reporting. I'd caution against an LLM agent reading private security advisories at all — that's an exfiltration path on a security product. Any advisory-related automation should stay confined to public CVE cross-referencing, which the dependency-review gate in §1.2 already covers — not a new capability that reads private reports.
+See: [`SECURITY.md`](https://github.com/kyverno/kyverno/blob/main/SECURITY.md)
+
+Open questions for you to review: ["1. Open questions for maintainers — Smaller Automation Gaps"](https://github.com/kpj2006/test/blob/main/lfx-research-raw-automation-gaps.md#1-open-questions-for-maintainers-smaller-automation-gaps)
+
+---
+
+## 8. Repo Structure & Agent Guardrails
+
+### 8.1 Monorepo restructuring — evaluated, and the answer is no
+
+The root `go.mod` is the only real module; the `github.com/kyverno/*` dependencies (`api`, `sdk`, `pkg/ext`, etc.) come in as ordinary pseudo-versioned Go modules with no `replace` directives pointing at local paths, and there are no git submodules. The only cross-repo coupling found is a single fork-patch `replace` for `k8s.io/pod-security-admission`. Splitting further would fragment an already-correctly-modularised codebase; pulling the satellite repos in would just relocate the coupling, not remove it — worth stating as evaluated-and-rejected rather than spending phase time re-confirming it.
+
+### 8.2 Deepening AGENTS.md: per-directory stubs, a machine-readable task index, and a real safety boundary
+
+Root `AGENTS.md` is already ~246 lines and unusually good — full make-target tables, API versioning rules, a DCO+codegen failure-prevention checklist. The highest-churn directory with the least coverage is `pkg/cel/` (910 touches in 12 months, more than `pkg/engine`+`pkg/webhooks`+`pkg/background` combined, and barely mentioned) — that's where a per-directory `AGENTS.md` should land first, ahead of `pkg/engine`/`pkg/webhooks`/`test/conformance` as the issue assumes.
+
+The task index is close to free: `make help` already documents 123 targets via a `target: ## description` convention, so `make codegen-agent-manifest` just needs to parse that into `.github/agent-manifest.json`, hand-annotated with `needs_cluster` and `approx_minutes`.
+
+For the safety boundary: not a gist — unversioned, unreviewable, outside branch protection, a non-starter on a security project. `.github/ai-maintainer.yaml`, CODEOWNERS-protected, listing `never_touch` (`api/kyverno/v1/**`, `pkg/cosign/**`, `pkg/notary/**`, `charts/kyverno/templates/rbac/**`) versus `agent_autonomous` paths. The differentiator worth leaning on: express that same boundary as an actual Kyverno `ClusterPolicy`, and validate an agent's proposed action against it with `kubectl-kyverno` in CI — Kyverno enforcing its own agent's permissions with Kyverno policy.
+See: [`AGENTS.md`](https://github.com/kyverno/kyverno/blob/main/AGENTS.md)
+
+### 8.3 Structured PR metadata — mostly a consumption problem, not a missing-data problem
+
+`semantic.yml` and the `/kind` labels already classify PRs; nothing downstream reads that classification. The one real gap is a deterministic breaking-API check specifically — the rules already written into `AGENTS.md`'s API Design Rules (no new types in `v1`, no attribute deletion/modification without a 3-minor-release deprecation window) are directly checkable against an `api/**` diff without any LLM judgment.
+
+### 8.4 Delegating per-directory work instead of one flat agent
+
+Splitting `AGENTS.md` per directory only pays off if something actually routes to the right stub instead of loading all of them — the same problem AOSSIE's own [Skills Ecosystem](https://github.com/AOSSIE-Org/Skills) and the `org-wide-skills/` structure on my [Template-Repo skills branch](https://github.com/kpj2006/SocialShareButton/tree/matt-skills) are built around: per-repo/per-area skill files, plus something that answers from the right one instead of one growing root file. The same shape fits here — a per-directory `AGENTS.md` a coding agent reads directly, and a thinner root file that just points to them.
+
+Open questions for you to review: ["1. Open questions for maintainers — Repo Structure & Agent Guardrails"](https://github.com/kpj2006/test/blob/main/lfx-research-raw-agent-guardrails.md#1-open-questions-for-maintainers-repo-structure--agent-guardrails)
