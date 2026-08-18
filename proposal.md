@@ -74,7 +74,7 @@ Red = the loop that costs runner-minutes and maintainer attention while adding n
 Two features, deliberately independent so they can land and be judged separately:
 
 ```mermaid
-flowchart TD
+flowchart LR
     A[Dependabot opens PR] --> B["NEW: dependency-review gate<br/>GET /dependency-graph/compare/{basehead}"]
     B --> C{New CVE ≥ threshold<br/>or license outside allowlist?}
     C -- yes --> D["Block · comment advisory + affected package<br/>label needs-maintainer"]
