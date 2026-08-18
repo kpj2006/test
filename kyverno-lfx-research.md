@@ -1,6 +1,4 @@
-# Kyverno AI Maintainer Assistant — Research Notes
-
-Grounded in a fresh clone of `kyverno/kyverno` (main, Aug 2026) + GitHub API. Every claim below is checkable against a file path or issue number.
+# Kyverno AI Maintainer Assistant
 
 ---
 
@@ -64,7 +62,7 @@ Build the digest on top of what already emits data: the `failure-issue` action o
 
 **`Secret scanner → OSV-scanner → gitleaks / semgrep`**
 These are three different jobs; don't stack them blindly:
-- *Secrets*: **gitleaks** — genuinely absent from Kyverno. CodeRabbit also ships gitleaks and runs Pro features free on public repos, so this may come for free if CodeRabbit is adopted.
+- *Secrets*: **gitleaks** — genuinely absent from Kyverno as a standalone job, but CodeRabbit (adoption already confirmed with maintainers) ships gitleaks and runs Pro features free on public repos — this is covered by the CodeRabbit rollout, no separate workflow needed.
 - *SAST*: **semgrep** — already there, daily.
 - *Dependency CVEs*: **Trivy** — already there. Adding **OSV-Scanner** mostly duplicates Trivy on Go modules; <cite index="24-3">both walk manifests without configuration</cite>, and <cite index="23-1">OSV-Scanner's differentiator is guided remediation suggesting minimum version bumps that fix everything at once</cite>. Propose it only if you can show Trivy is missing Go advisories in practice. Otherwise it reads as tool-stacking.
 
@@ -209,13 +207,13 @@ Don't build a confidence score from model self-report; it's unreliable and maint
 Kyverno is on Dependabot with grouping and only 1 open bot PR — grouping already solved the volume problem. A Renovate migration is a large, disruptive change with modest payoff here. If you propose it, propose it as an *evaluation deliverable* (write the ADR, don't force the migration). `DEPENDENCY-POLICY.md` exists at the repo root — read it before you write anything about dependency handling; it likely constrains what auto-merge is even permissible.
 
 **`Issue enrichment keys of CodeRabbit`**
-CodeRabbit's config schema does expose automatic issue enrichment — <cite index="12-1">the configuration reference documents settings for automatic issue enrichment that analyse and enrich issues with related code, potential solutions and a complexity assessment, defaulting to false</cite>. So it's a config toggle, not a build.
+CodeRabbit's config schema does expose automatic issue enrichment — <cite index="12-1">the configuration reference documents settings for automatic issue enrichment that analyse and enrich issues with related code, potential solutions and a complexity assessment, defaulting to false</cite>. With CodeRabbit adoption confirmed, enable this toggle directly — it's a config flip, not a custom Triage Agent to build.
 
 **`missing info → Danger.yaml`**
-Danger is JS-based and would add a Node toolchain to a Go repo — friction. Kyverno's issue templates are already `.yaml` forms with required fields, so "missing info" is mostly detectable with a small Go or `yq` check, or just CodeRabbit. Don't add an ecosystem.
+Danger is JS-based and would add a Node toolchain to a Go repo — friction, and unnecessary now that CodeRabbit is confirmed. Kyverno's issue templates are already `.yaml` forms with required fields, so missing-info detection is covered by CodeRabbit directly. Don't add a Node ecosystem for something already covered.
 
 **`We could also give skills to CodeRabbit for expected behaviours`**
-Partially yes, and the mechanism matters:
+Yes — with adoption confirmed, this is where to put the configuration effort. The mechanism matters:
 - `.coderabbit.yaml` `path_instructions` gives per-glob review instructions — <cite index="14-1">e.g. distinct instruction blocks for `src/api/**` vs `src/db/**` vs `**/*.test.*`</cite>. Map these onto Kyverno's real risk surface: `api/kyverno/v1/**` (versioning rules from `AGENTS.md`), `pkg/cosign/**` + `pkg/notary/**` (supply chain), `pkg/webhooks/**` (admission path), `**/zz_generated.*` (should be filtered out entirely).
 - <cite index="8-1">`AGENTS.md` and `CLAUDE.md` are auto-detected as guideline sources</cite>, so splitting `AGENTS.md` per-directory improves CodeRabbit and your agents simultaneously.
 - <cite index="17-1">CodeRabbit Pro features are free on public repositories with no activation step or time limit</cite> — relevant to a CNCF project's zero-budget constraint, and worth stating.
@@ -223,27 +221,7 @@ Partially yes, and the mechanism matters:
 
 ---
 
-## 3. A strategic warning about the CodeRabbit-heavy approach
-
-Your notes route roughly a dozen requirements to CodeRabbit. That's often the *correct engineering answer* — and it's a bad *proposal* if left unqualified, because a reviewer reads "configure an off-the-shelf SaaS bot" and sees three months of YAML editing.
-
-Reframe it as a deliberate build-vs-buy analysis, delivered as an artifact:
-
-> **Deliverable 0: a build-vs-adopt matrix.** For each of the ~20 capabilities, an evaluation of existing tooling (CodeRabbit, Renovate, release-drafter, actions/stale, dependency-review-action) against custom agents, with a recommendation and a rationale. Then build only what nothing off-the-shelf covers.
-
-That turns a weakness into evidence of engineering judgment — and it's genuinely what a good maintainer would want. Then the things you actually *build* are the ones nothing can buy:
-
-1. Diff → chainsaw-suite mapping and dynamic matrix generation
-2. Flake detection + quarantine lifecycle with expiry
-3. Issue → chainsaw regression test repro pipeline
-4. The generated, drift-proof agent manifest
-5. The Kyverno-policy-enforced automation boundary
-
-Five original contributions plus a rigorous adoption analysis is a far stronger project than twenty half-built bots.
-
----
-
-## 4. Multi-agent architecture
+## 3. Multi-agent architecture
 
 You asked about running multiple agents. The design principle that matters most:
 
@@ -292,7 +270,7 @@ Nothing reaches level 4 without measured precision at level 3.
 
 ---
 
-## 5. Additional capabilities worth proposing
+## 4. Additional capabilities worth proposing
 
 Ranked by *(differentiation × plausibility of landing)*.
 
@@ -320,7 +298,7 @@ Ranked by *(differentiation × plausibility of landing)*.
 
 ---
 
-## 6. Risks maintainers will raise — address these before they do
+## 5. Risks maintainers will raise — address these before they do
 
 **Prompt injection is a supply-chain vulnerability here, not a hypothetical.** Every issue body, PR description, and code comment is attacker-controlled text. An agent with merge rights that reads a PR description is a remote-code-execution path into a security product used for Kubernetes admission control. Mandatory posture: untrusted content never enters a context that holds a write-capable token; the deciding agent and the reading agent are separate processes; all model output is validated against a schema before it becomes an API call.
 
@@ -336,11 +314,11 @@ Ranked by *(differentiation × plausibility of landing)*.
 
 ---
 
-## 7. Suggested phase restructure
+## 6. Suggested phase restructure
 
 The issue's phases are ordered by implementation convenience. Reorder by value and risk:
 
-- **Phase 0 — Audit & metadata (weeks 1–3).** Build-vs-adopt matrix. Extend `labels.yml` with `suites:`/`unit:` and publish the path→suite coverage report. Generated `agent-manifest.json` + `verify-codegen` hook. Split `AGENTS.md` per-directory + the make-target consistency check. Baseline metrics: runner-minutes, `workflow-failure` rate, PR age distribution.
+- **Phase 0 — Audit & metadata (weeks 1–3).** Configure CodeRabbit (`.coderabbit.yaml` `path_instructions` per the risk-surface mapping in §Sheet 3 — adoption is already confirmed with maintainers, so this is configuration, not evaluation). Extend `labels.yml` with `suites:`/`unit:` and publish the path→suite coverage report. Generated `agent-manifest.json` + `verify-codegen` hook. Split `AGENTS.md` per-directory + the make-target consistency check. Baseline metrics: runner-minutes, `workflow-failure` rate, PR age distribution.
 - **Phase 1 — Deterministic wins (weeks 3–6).** Scoped test selection → PR-time conformance. Codegen auto-fix. API compatibility linter. `dependency-review-action` gate. release-drafter. Enable `/retest`. Cache reaper. *All deterministic; none can hallucinate; each independently landable.*
 - **Phase 2 — Flake lifecycle (weeks 6–9).** Result ingestion, flip-rate detection, quarantine + de-quarantine PRs with expiry, nightly soak lane, maintainer digest.
 - **Phase 3 — Judgment agents (weeks 9–12).** Triage classification, missing-info detection, repro→chainsaw pipeline. Trust ladder level 1→2 only.
@@ -350,7 +328,7 @@ Note what moved: **scoped test selection went from Phase 2 to Phase 1**, and **a
 
 ---
 
-## 8. Questions to put to the maintainers
+## 7. Questions to put to the maintainers
 
 Ask these in the issue thread or Slack before submitting. Asking good questions is itself a selection signal, and Jim Bugwadia is listed as the mentor.
 
@@ -358,20 +336,19 @@ Ask these in the issue thread or Slack before submitting. Asking good questions 
 2. `quarantined-tests: applyconfiguration` and `sync-modify-downstream` are hardcoded in `tests-conformance.yaml` — is there a record of why, and is anyone tracking their removal?
 3. What's the maintainer view on the 95 `workflow-failure` issues? Useful signal, or noise you'd rather see aggregated into one digest?
 4. Does `DEPENDENCY-POLICY.md` constrain what dependency automation is permissible? Is auto-merge acceptable in principle for a project in the admission path?
-5. Is CodeRabbit (or similar) already under evaluation? Would you rather the mentee integrate it or build in-tree?
-6. What's the appetite for the agent pushing commits directly to contributor PR branches (codegen fixes) versus only opening draft PRs?
-7. Should this live in `kyverno/kyverno`, in `kyverno/.github` (where `pr-branch-updater` already lives), or as a standalone repo reusable by other CNCF projects?
-8. `CODEOWNERS` is 24 paths — is that deliberate minimalism, or has it just drifted?
+5. What's the appetite for the agent pushing commits directly to contributor PR branches (codegen fixes) versus only opening draft PRs?
+6. Should this live in `kyverno/kyverno`, in `kyverno/.github` (where `pr-branch-updater` already lives), or as a standalone repo reusable by other CNCF projects?
+7. `CODEOWNERS` is 24 paths — is that deliberate minimalism, or has it just drifted?
 
-Question 7 matters more than it looks: if this is built to be reusable across CNCF projects rather than Kyverno-specific, the project's ceiling — and the visibility you get from it — is considerably higher.
+Question 6 matters more than it looks: if this is built to be reusable across CNCF projects rather than Kyverno-specific, the project's ceiling — and the visibility you get from it — is considerably higher.
 
 ---
 
-## 9. Second pass — verified addenda (Aug 2026, direct repo inspection)
+## 8. Second pass — verified addenda (Aug 2026, direct repo inspection)
 
 A deeper multi-agent research pass hit a session-limit interruption before most branches reported back (CI/scoped-testing, novel-capabilities, and community/release research did not return — treat those sections above as the current best answer, not yet re-verified against fresh data). What follows is what was independently confirmed by direct repo inspection in the meantime. It sharpens three points above and adds one new, concrete finding: **the docs and CODEOWNERS have already drifted in exactly the way §2 warns they will** — this is live evidence, not a hypothetical, and it's a strong opening anecdote for the "docs that can lie" argument.
 
-### 9.1 Monorepo question — answer is a clean "no, and here's the evidence"
+### 8.1 Monorepo question — answer is a clean "no, and here's the evidence"
 
 `go.mod` at repo root is the only real module; `hack/api-group-resources/go.mod` and `hack/controller-gen/go.mod` are isolated tool modules (standard Go practice to keep codegen-tool deps out of the main dependency graph — not evidence of a coupling problem). Five `github.com/kyverno/*` org dependencies are pulled as ordinary pseudo-versioned Go modules, no `replace` directives pointing at local paths, no git submodules:
 
@@ -386,7 +363,7 @@ github.com/kyverno/pkg/ext            v0.0.0-20250303002756-48769d003e55
 
 This is textbook Go multi-repo hygiene, already working. The only non-Go-module cross-repo coupling in the tree is the one `replace k8s.io/pod-security-admission => github.com/kyverno/pod-security-admission ...` fork-patch, which is a deliberate, narrow override, not a structural problem. **Recommendation: state in the proposal that a monorepo restructuring was evaluated and explicitly rejected** — splitting further would fragment a codebase that's already correctly modularised, and merging the org's satellite repos in would just relocate the coupling rather than remove it. Spending phase-0 time "evaluating monorepo boundaries" as the issue suggests would mostly re-confirm this; better to say so up front and redirect that time into AGENTS.md/manifest work, which has a real gap.
 
-### 9.2 CODEOWNERS has already drifted — with a reproducible example
+### 8.2 CODEOWNERS has already drifted — with a reproducible example
 
 Sheet 2 asked "is 24 paths deliberate minimalism, or has it drifted?" Direct verification of every path in `CODEOWNERS` (23 entries) against the working tree answers it:
 
@@ -397,7 +374,7 @@ That's three of twenty-three CODEOWNERS lines silently dead — over 10% rot, un
 
 The same drift pattern shows up in `DEPENDENCY-POLICY.md`, which names four workflow files that don't exist under those names: it says `trivy.yaml` / `trivy-periodic-scan.yaml` / `lint.yaml` / `scorecard.yaml`, but the actual files are `scan-trivy.yaml`, `periodic-trivy.yaml`, `check-golangci-lint.yaml`, and `scan-scorecard.yaml`. Same failure mode, different file — worth citing both as a pair in the proposal ("this isn't a one-off, it's a pattern the repo doesn't currently have any mechanism to catch").
 
-### 9.3 Real 12-month churn ranking (`git log --since="12 months ago" --name-only`, by top-level+second-level dir)
+### 8.3 Real 12-month churn ranking (`git log --since="12 months ago" --name-only`, by top-level+second-level dir)
 
 This is the evidence base for *which* directories get a per-directory `AGENTS.md` first, replacing guesswork:
 
@@ -423,21 +400,21 @@ Two things this ranking changes about the proposal:
 - **`pkg/cel` is the single highest-churn hand-written package by a wide margin** (910 touches, more than `pkg/engine` + `pkg/webhooks` + `pkg/background` combined) — this is where the CEL-based policy types (`ValidatingPolicy`, `ImageValidatingPolicy`, etc.) are actively being built out. It's already in `CODEOWNERS`, but it should be the **first** per-directory `AGENTS.md`, ahead of `pkg/engine`/`pkg/webhooks` as the issue assumes — the issue's suggested target list is one release-cycle out of date.
 - `pkg/client` (556) is 100% generated (`make codegen-client-all`) — high churn there is noise from regeneration commits, not human decision-making, so it should be *excluded* from the "needs an AGENTS.md" list and *included* in the generated-paths / autofixable list instead. Don't let raw churn numbers alone drive the doc-priority list without this filter.
 
-### 9.4 Make targets — real count for the machine-readable manifest
+### 8.4 Make targets — real count for the machine-readable manifest
 
-`make help` currently documents **123 targets** via the `target: ## description` convention (grep-verified, not estimated). Categories, with real counts: `build-*`/`ko-build-*`/`ko-publish-*` (~23), `codegen-*` (~24), `test-*`/`test-cli-local-*` (~19, including per-policy-kind CLI test targets: `vpols`, `gpols`, `mpols`, `ivpols`, `dpols`, `vaps`, `maps` — one per CEL policy kind, confirming §9.3's point that this surface is actively multiplying), `kind-*` cluster lifecycle (~19), `dev-lab-*` observability stack (~8), plus `fmt`/`vet`/`lint`/`verify-codegen`/`release-notes`/`help`. This is a clean, already-consistent source to generate `.github/agent-manifest.json` from — every target already self-documents via the `## ` comment convention the proposal's draft schema (§Sheet 2) assumed existed; it does, which de-risks that deliverable considerably. The remaining work is purely: (a) a `make codegen-agent-manifest` script that parses this existing convention into JSON, (b) hand-annotating each target with the two fields the convention doesn't capture — `needs_cluster` (true for every `kind-*`/`test-cli-policies`/`dev-lab-*` target, false for `build-*`/unit tests) and `approx_minutes` (needs a handful of timed CI runs to seed, not guesswork).
+`make help` currently documents **123 targets** via the `target: ## description` convention (grep-verified, not estimated). Categories, with real counts: `build-*`/`ko-build-*`/`ko-publish-*` (~23), `codegen-*` (~24), `test-*`/`test-cli-local-*` (~19, including per-policy-kind CLI test targets: `vpols`, `gpols`, `mpols`, `ivpols`, `dpols`, `vaps`, `maps` — one per CEL policy kind, confirming §8.3's point that this surface is actively multiplying), `kind-*` cluster lifecycle (~19), `dev-lab-*` observability stack (~8), plus `fmt`/`vet`/`lint`/`verify-codegen`/`release-notes`/`help`. This is a clean, already-consistent source to generate `.github/agent-manifest.json` from — every target already self-documents via the `## ` comment convention the proposal's draft schema (§Sheet 2) assumed existed; it does, which de-risks that deliverable considerably. The remaining work is purely: (a) a `make codegen-agent-manifest` script that parses this existing convention into JSON, (b) hand-annotating each target with the two fields the convention doesn't capture — `needs_cluster` (true for every `kind-*`/`test-cli-policies`/`dev-lab-*` target, false for `build-*`/unit tests) and `approx_minutes` (needs a handful of timed CI runs to seed, not guesswork).
 
-### 9.5 What's still open (from the first addendum pass)
+### 8.5 What's still open (from the first addendum pass)
 
-The CI/scoped-testing job-level breakdown, the security/auto-merge predicate are now filled in below (§10, §11). The issue/PR toil quantification and the ranked novel-capabilities list (the two research branches that failed on their first attempt and were not re-run) are still at the state described in §0–§8 above.
+The CI/scoped-testing job-level breakdown, the security/auto-merge predicate are now filled in below (§9, §10). The issue/PR toil quantification and the ranked novel-capabilities list (the two research branches that failed on their first attempt and were not re-run) are still at the state described in §0–§7 above.
 
 ---
 
-## 10. Third pass — CI job graph, scoped-test design, and flaky-test lifecycle (verified in full)
+## 9. Third pass — CI job graph, scoped-test design, and flaky-test lifecycle (verified in full)
 
 This closes out the keystone deliverable from §0 with real numbers instead of estimates.
 
-### 10.1 The 55-job conformance matrix, in full
+### 9.1 The 55-job conformance matrix, in full
 
 `tests-conformance.yaml` (1104 lines) has 55 top-level jobs. Every standard job runs through the composite action `.github/actions/tests/conformance/run/action.yaml` (install helm/cosign/yq/chainsaw → kind cluster up → load image archive → `USE_CONFIG=<kyverno-configs> make kind-install-kyverno` → apply CRDs → dynamic quarantine patch → `chainsaw test --shard-index --shard-count`). A handful bypass it entirely with hand-rolled steps: `custom-sigstore` (stands up its own Fulcio/Rekor/TUF stack), `check-tests` (runs the actual compiled CLI binary, not the image archive), and the four `helm-*` jobs (no chainsaw at all — Helm install/upgrade/uninstall lifecycle checks).
 
@@ -447,29 +424,29 @@ Highlights that matter for a scoped-selection design:
 - The three `generate/mutating-admission-policy*` families (alpha/beta/v1) are three separate top-level jobs, each pinned to a different single k8s version via a dedicated `kind-config` file, and each independently applies the `applyconfiguration` quarantine.
 - Total matrix-expanded runner count for one full firing of this workflow: several hundred jobs (the earlier "~54 jobs / 150+ runners" estimate in §0 was directionally right but low — closer to several hundred once every shard × k8s-version combination is counted).
 
-### 10.2 Two dead conformance suites — a concrete "orphan detector" proof of concept
+### 9.2 Two dead conformance suites — a concrete "orphan detector" proof of concept
 
 Of the 52 top-level suite directories, two are **true orphans**, verified two independent ways:
 - `test/conformance/chainsaw/configs/` (2 real, schema-valid tests) and `test/conformance/chainsaw/flags/standard/emit-events/` (1 test) have **zero `tests-path:` references anywhere in `.github/`** (`grep -rn "chainsaw/configs" .github` → 0 hits), and
 - they are the **only 2 of the 52 suite roots with no `.chainsaw.yaml` file at all**.
 
-Both were last touched only by a schema-lint chore (#14707, "add missing chainsaw test schema directives") — i.e., they look maintained (someone keeps their YAML schema-valid) but haven't actually executed in CI since at least that commit. This is a ready-made, cheap proof-of-concept for the AI-assistant pitch: **a CI check that diffs `find test/conformance/chainsaw -maxdepth 1 -type d` against every `tests-path:` value across all workflow YAML** would have caught these 3 dead test cases immediately, deterministically, no LLM required. Worth landing as a pre-mentorship PR alongside the cache reaper and the CODEOWNERS-path checker (§9.2) — three small, real, already-identified doc/test-drift bugs make a strong "I read the repo, not just the issue" opener.
+Both were last touched only by a schema-lint chore (#14707, "add missing chainsaw test schema directives") — i.e., they look maintained (someone keeps their YAML schema-valid) but haven't actually executed in CI since at least that commit. This is a ready-made, cheap proof-of-concept for the AI-assistant pitch: **a CI check that diffs `find test/conformance/chainsaw -maxdepth 1 -type d` against every `tests-path:` value across all workflow YAML** would have caught these 3 dead test cases immediately, deterministically, no LLM required. Worth landing as a pre-mentorship PR alongside the cache reaper and the CODEOWNERS-path checker (§8.2) — three small, real, already-identified doc/test-drift bugs make a strong "I read the repo, not just the issue" opener.
 
-### 10.3 The PR-time conformance gap is wider than §0 suggested
+### 9.3 The PR-time conformance gap is wider than §0 suggested
 
 `comment-conformance.yaml` (the `/conformance` PR opt-in) only rebuilds images+cli and calls `tests-conformance.yaml` — the 52-suite matrix. It **never reaches `tests-k6.yaml`** (perf regression testing, 3 scenarios × 100 VUs × 1000 iterations against Prometheus) **or `tests-conformance-policy-library.yaml`** (the external `kyverno/policies` repo's own chainsaw suite, 3×12 shards). Both are `workflow_call`-only, reachable exclusively from the push-triggered `check-tests.yaml` orchestrator. So even a maintainer who explicitly asks for conformance on a PR gets zero perf-regression signal and zero policy-library-compatibility signal pre-merge — those two categories of breakage are *always* discovered after merge. This sharpens the keystone framing in §0: scoped selection needs to close this gap too, not just make the existing 52-suite opt-in cheaper.
 
 Also notable: `check-framework.yaml` (the 5-way `vpol/mpol/gpol/dpol/ivpol` envtest integration suite) is the only test workflow of the five with a `paths-ignore` filter (skips on docs/charts/`*.md`-only diffs) and the only one with **no `failure-issue` tracking wired up** — envtest breakages on main are invisible to the maintainer digest mechanism entirely.
 
-### 10.4 Path→suite mapping: the one blind spot that matters most
+### 9.4 Path→suite mapping: the one blind spot that matters most
 
 The path→suite evidence table (10 source dirs, each with a directly-cited suite correlation) confirms the mapping is buildable from CRD-`kind` correlation and directory-name matching alone — no coverage instrumentation needed for a first version. **But one structural blind spot needs to be designed around from day one**: the CEL policy CRD types (`ValidatingPolicy`, `MutatingPolicy`, `GeneratingPolicy`, `DeletingPolicy`, `ImageValidatingPolicy`) are **not defined in this repo at all** — they live in the external module `github.com/kyverno/api`, bumped roughly monthly (9 version bumps visible in `git log -p -- go.mod` over 7 months). A pure `git diff --name-only` selector is blind to this: a routine `go.mod` bump of that one dependency should force re-running essentially the entire CEL-policy conformance surface (`validating-policies`, `mutating-policies`, `generating-policies`+namespaced, `deleting-policies`+namespaced, `image-validating-policies`+namespaced, plus every `pkg/cel/...` and `pkg/webhooks/resource/{vpol,mpol,gpol,ivpol}` unit-test package), and a naive selector would instead see "only go.mod changed" and under-select. **Any scoped-test-selection proposal must state this as an explicit special rule**, not an edge case discovered later: `go.mod` diffs touching `github.com/kyverno/api` (or any other `github.com/kyverno/*` dependency) map to a hardcoded broad suite set, distinct from the normal path-based lookup.
 
 For an empirical (not just heuristic) version of the mapping: no `GOCOVERDIR`/coverage-instrumented-binary mechanism exists anywhere in the repo today (confirmed by grep). The proposed net-new approach — build the controller/webhook binaries with `go build -cover`, run each chainsaw suite against the instrumented image, `go tool covdata percent` per suite, and diff-mine the resulting coverage matrix — is a real, buildable Phase-2 deliverable, not currently duplicated by anything.
 
-### 10.5 Unit-test selection via Go's build graph — a verified, working pipeline
+### 9.5 Unit-test selection via Go's build graph — a verified, working pipeline
 
-Because the whole repo is one Go module (§9.1), a plain `go list -deps` reverse-dependency walk works without any per-module stitching. This was run live against the repo, not estimated:
+Because the whole repo is one Go module (§8.1), a plain `go list -deps` reverse-dependency walk works without any per-module stitching. This was run live against the repo, not estimated:
 
 ```bash
 go list -deps -json ./pkg/... > deps.json                         # 2m32s, 59MB, ~1500 packages
@@ -479,9 +456,9 @@ jq -r 'select(.Deps) | .ImportPath as $p |
 awk -F'\t' -v pkg="$CHANGED" '$2==pkg {print $1}' edges.tsv         # reverse lookup
 ```
 
-Real, verified numbers from this run: `pkg/engine` → 45 transitive dependents (41 with `_test.go` files, i.e. real `go test` targets out of 137 total testable packages under `./pkg/...`); `pkg/cel/policies/vpol` → exactly **1** dependent, `pkg/webhooks/policy` (confirming it's the sole caller in the tree); `pkg/webhooks/handlers` → 12 dependents; `pkg/image/verification` → 0 (a leaf package, only imported from outside `./pkg/...`). Same `go.mod`-diff caveat as §10.4 applies: this pipeline needs the identical special-case rule for external-module bumps.
+Real, verified numbers from this run: `pkg/engine` → 45 transitive dependents (41 with `_test.go` files, i.e. real `go test` targets out of 137 total testable packages under `./pkg/...`); `pkg/cel/policies/vpol` → exactly **1** dependent, `pkg/webhooks/policy` (confirming it's the sole caller in the tree); `pkg/webhooks/handlers` → 12 dependents; `pkg/image/verification` → 0 (a leaf package, only imported from outside `./pkg/...`). Same `go.mod`-diff caveat as §9.4 applies: this pipeline needs the identical special-case rule for external-module bumps.
 
-### 10.6 Flaky-test lifecycle: quarantine is a runtime patch, not a static flag
+### 9.6 Flaky-test lifecycle: quarantine is a runtime patch, not a static flag
 
 The mechanism is more specific than "hardcoded quarantine list" — it's a live YAML mutation. `.github/actions/tests/conformance/run/action.yaml:110-141` takes the workflow-level `quarantined-tests` input (comma-separated directory *basenames*), finds every directory under the job's `tests-path` matching that basename, and runs `yq eval '.spec.skip = true' -i` on each matching `chainsaw-test.yaml` **at CI runtime**, before chainsaw runs. That's distinct from — and additional to — 4 **statically committed** `skip: true` tests found by direct grep, none carrying any explanatory comment or issue reference:
 - `verify-images/clusterpolicy/standard/update-multi-containers`
@@ -489,15 +466,15 @@ The mechanism is more specific than "hardcoded quarantine list" — it's a live 
 
 Two more concrete gaps for the quarantine-lifecycle deliverable (§0, §Sheet 2) to close: **Chainsaw itself runs a beta release** (`v0.2.15-beta.3`, pinned via the installer action `kyverno/action-install-chainsaw@...#v0.2.14`) with `failFast: true` and no retry field anywhere in any `.chainsaw.yaml` — a single flaky step fails the whole test immediately, no built-in flake tolerance exists. And **no JUnit/JSON report output is configured anywhere** (`--report-format`/`--report-path` — flags chainsaw already supports upstream — are never passed); failures are visible only as raw stdout/exit-code in the Action log. Adding those two flags to the composite action and uploading the artifact is a small, concrete, low-risk PR that unlocks all downstream flaky-test analytics — currently there is *no* machine-readable per-test result anywhere to build a flip-rate detector on top of.
 
-### 10.7 `failure-issue` — exact lifecycle (confirms and sharpens §0's free-time-series claim)
+### 9.7 `failure-issue` — exact lifecycle (confirms and sharpens §0's free-time-series claim)
 
-`.github/actions/workflow/failure-issue/action.yaml` (121 lines): dedup key is `workflow-failure:${workflowName}:${branch}`, embedded as an HTML comment in the issue body; title is stable (`Workflow failed: ${workflowName} (${branch})`, no run-id/commit in it) so repeated failures update the *same* issue rather than spawning new ones; on success, if a matching open issue exists it posts a closing comment and sets `state: closed`, otherwise does nothing. Wired into `check-unit-tests.yaml`, `check-cli-tests.yaml`, and the top-level `check-tests.yaml` — all **push-only**, so PR failures never open tracking issues, only main/release-branch breakages do. `check-framework.yaml` is the one sibling workflow with no such wiring at all (§10.3). This confirms the open→close-interval time-series proposed in §Sheet 1 is real and free, but the dedup granularity is per (workflow, branch) — not per job or per test — so extracting a *test-level* flip-rate needs the JUnit/JSON output from §10.6, not the issue history alone.
+`.github/actions/workflow/failure-issue/action.yaml` (121 lines): dedup key is `workflow-failure:${workflowName}:${branch}`, embedded as an HTML comment in the issue body; title is stable (`Workflow failed: ${workflowName} (${branch})`, no run-id/commit in it) so repeated failures update the *same* issue rather than spawning new ones; on success, if a matching open issue exists it posts a closing comment and sets `state: closed`, otherwise does nothing. Wired into `check-unit-tests.yaml`, `check-cli-tests.yaml`, and the top-level `check-tests.yaml` — all **push-only**, so PR failures never open tracking issues, only main/release-branch breakages do. `check-framework.yaml` is the one sibling workflow with no such wiring at all (§9.3). This confirms the open→close-interval time-series proposed in §Sheet 1 is real and free, but the dedup granularity is per (workflow, branch) — not per job or per test — so extracting a *test-level* flip-rate needs the JUnit/JSON output from §9.6, not the issue history alone.
 
 ---
 
-## 11. Third pass — dependency automation, security scanning, and the auto-merge predicate (verified in full)
+## 10. Third pass — dependency automation, security scanning, and the auto-merge predicate (verified in full)
 
-### 11.1 Every scanner in the repo runs post-merge or on a schedule — except one
+### 10.1 Every scanner in the repo runs post-merge or on a schedule — except one
 
 Direct, full read of all seven scan/periodic workflows:
 
@@ -514,7 +491,7 @@ Direct, full read of all seven scan/periodic workflows:
 
 This is a sharper, fully-verified version of §Sheet 1's "dependency review → PR-time gate is the real gap" point: it's not just dependency-review-action that's missing, it's that **every single vulnerability/license/quality scanner in the repo is structurally incapable of blocking a PR today**, `check-sha-pinned-actions` being the sole exception. A vulnerable or malicious dependency bump merges cleanly and is only caught after the fact, surfacing as an auto-filed `codeql`/`security` issue via `sync-trivy-issues.yaml`. This is the single cleanest "PR-time security gate" pitch in the whole proposal — concrete, quantified, and distinct from the already-known Trivy/Semgrep/Scorecard *existing*.
 
-### 11.2 Dependabot: grouping solved PR count, not review latency — real 90-day data
+### 10.2 Dependabot: grouping solved PR count, not review latency — real 90-day data
 
 `dependabot.yml` has exactly 2 ecosystems (`gomod`: root + 2 hack/ dirs; `github-actions`: root + `.github/actions/*/`), both daily, `rebase-strategy: disabled` on both (which is *why* `pr-branch-updater.yml` exists — it's compensating for this specific Dependabot setting), only 3 groups (kubernetes/sigstore/otel) covering a fraction of the ~107 direct deps, no `ignore:` blocks at all.
 
@@ -522,15 +499,15 @@ Live data (2026-08-16): **62 Dependabot PRs merged in the last 90 days, 1,401 al
 
 **This meaningfully updates §0's "the pain here is smaller than the issue implies" caveat**: the *count* problem is genuinely small (1 open PR right now), but the *data shows a real, quantified review-latency problem* that grouping does nothing to address — every single sampled bump, however trivial, sits for hours waiting on a human, and some churn through repeated rebases while waiting. That's a stronger, evidence-backed case for auto-merge than the original framing, not a weaker one — reframe accordingly.
 
-### 11.3 Supply-chain output signing is mature; the gap is entirely on the input side
+### 10.3 Supply-chain output signing is mature; the gap is entirely on the input side
 
-Full read of `images-publish.yaml`, `release.yaml`, and `.github/actions/image/publish/action.yaml`: every one of the 7 published images (built via `ko`, no Dockerfiles exist anywhere in the repo) gets a CycloneDX SBOM (`CycloneDX/gh-gomod-generate-sbom`), keyless OIDC cosign signing, `cosign attach sbom`, and a SLSA3 provenance attestation via `slsa-framework/slsa-github-generator` — plus a pre-publish `trivy-action` filesystem scan of the whole repo, and (on tagged releases) the Helm/Flux install manifest itself gets pushed as an OCI artifact and cosign-signed too. This is genuinely comprehensive supply-chain *output* hardening — there is no meaningful gap to propose on the signing/attestation side. The gap, confirmed by §11.1, is entirely upstream: nothing scans an *incoming* dependency change before merge.
+Full read of `images-publish.yaml`, `release.yaml`, and `.github/actions/image/publish/action.yaml`: every one of the 7 published images (built via `ko`, no Dockerfiles exist anywhere in the repo) gets a CycloneDX SBOM (`CycloneDX/gh-gomod-generate-sbom`), keyless OIDC cosign signing, `cosign attach sbom`, and a SLSA3 provenance attestation via `slsa-framework/slsa-github-generator` — plus a pre-publish `trivy-action` filesystem scan of the whole repo, and (on tagged releases) the Helm/Flux install manifest itself gets pushed as an OCI artifact and cosign-signed too. This is genuinely comprehensive supply-chain *output* hardening — there is no meaningful gap to propose on the signing/attestation side. The gap, confirmed by §10.1, is entirely upstream: nothing scans an *incoming* dependency change before merge.
 
 `check-sha-pinned-actions.yaml` (the one PR-gating security check) enforces full-commit-SHA pinning on every `uses:` in every workflow, with a single named exception (`slsa-framework/slsa-github-generator`, which needs a semver tag per the SLSA spec — this is *why* it's the sole allowlist entry, not an oversight). **Concrete implication for any agent that edits workflow files**: it must never write a floating tag (`@v4`, `@main`) — every action reference it touches must resolve to a full SHA with a `# vX.Y.Z` comment, exactly like Dependabot's own `github-actions` ecosystem bumps already do. The clean design is to have the agent defer SHA resolution to Dependabot rather than hand-computing it.
 
 Go dependency scale: 107 direct + 305 indirect (413 total require lines), `go.sum` 1318 lines, `vendor/` confirmed absent, no `GOFLAGS`/`GOPRIVATE`/`GOSUMDB`/`GOPROXY` overrides anywhere — the 5 `github.com/kyverno/*` org dependencies are pulled and checksum-verified exactly like any third-party module, no special trust carve-out.
 
-### 11.4 The auto-merge predicate, and an explicit policy conflict to flag to maintainers
+### 10.4 The auto-merge predicate, and an explicit policy conflict to flag to maintainers
 
 ```
 function should_auto_merge(pr):
@@ -549,39 +526,39 @@ function should_auto_merge(pr):
 
 **This needs to be surfaced as an explicit open question, not assumed**: `DEPENDENCY-POLICY.md` states, unconditionally, *"All proposed updates are reviewed by maintainers and must pass CI before merging."* A predicate that auto-merges patch-level bumps with zero human click contradicts the literal text of that sentence, even if it may be compatible with its *intent*. The proposal should present this as a decision point for maintainers ("does 'reviewed by maintainers' require a human click, or would a policy-as-code gate satisfy it for a defined low-risk subset?") and note that adopting auto-merge would likely require an accompanying edit to `DEPENDENCY-POLICY.md` — treating this as settled would be presumptuous given a CNCF security project's own written policy says otherwise.
 
-### 11.5 Two more automation gaps invisible to Dependabot entirely
+### 10.5 Two more automation gaps invisible to Dependabot entirely
 
 - **No Dockerfiles exist anywhere in the repo** — images build via `ko` (`.ko.yaml`, base image `ghcr.io/wolfi-dev/static:alpine`, pinned by a **floating tag, not a digest**). Because Dependabot's `docker` ecosystem parses `Dockerfile`/`docker-compose.yml`, it structurally cannot see or bump this base image even if added to `dependabot.yml` — there is currently **no automation of any kind** tracking updates to it. Closing this needs either a digest pin + small custom watcher, or accepting the drift.
 - **Helm chart dependencies are unmanaged.** `charts/kyverno/Chart.yaml` pins 3 genuinely external chart versions (`kyverno-api`, `openreports`, `reports-server`) — Dependabot has no generic Helm-chart-dependency ecosystem, so these are untouched by any bump automation today, confirmed by the full `dependabot.yml` read (only `gomod` + `github-actions`, nothing else).
 
 ---
 
-## 12. Consolidated addendum summary
+## 11. Consolidated addendum summary
 
-Sections 9–11 replace the "still open" items from the interrupted first addendum pass. Combined with the already-completed research in §0–§8, the standing gaps in this document are now only: **real issue/PR toil quantification** (open counts, age distribution, response-time — the "Issue triage and repro harness" branch, which failed twice on session limits and was not re-run a third time) and **the ranked novel-capabilities list re-verification** (the "Agent architecture" branch, same fate — §5's existing list stands as the current best draft, not yet independently re-checked). Everything else in this document is now grounded in a live, verified pass over the actual repo and GitHub data as of 2026-08-16.
+Sections 8–10 replace the "still open" items from the interrupted first addendum pass. Combined with the already-completed research in §0–§7, the standing gaps in this document are now only: **real issue/PR toil quantification** (open counts, age distribution, response-time — the "Issue triage and repro harness" branch, which failed twice on session limits and was not re-run a third time) and **the ranked novel-capabilities list re-verification** (the "Agent architecture" branch, same fate — §4's existing list stands as the current best draft, not yet independently re-checked). Everything else in this document is now grounded in a live, verified pass over the actual repo and GitHub data as of 2026-08-16.
 
 ---
 
-## 13. Fourth pass — new facts not covered by §9-11 (independent cross-check, same date)
+## 12. Fourth pass — new facts not covered by §8-10 (independent cross-check, same date)
 
-A second, independently-run set of agents re-covered the structure/AGENTS.md and dependency/CI ground in §9-11 using a slightly different methodology (e.g. full `./...` vs `./pkg/...`-scoped build-graph, 54 vs 55 conformance jobs, 51 vs 52 counted suite dirs). Where the two passes overlap, **conclusions matched despite different exact intermediate numbers** — e.g. both independently found ~290-range total conformance runner-jobs, both independently found the same 2 orphan suites (`configs/`, `flags/`), both independently found Dependabot's real problem is review-latency not count, both independently found DEPENDENCY-POLICY.md's language conflicts with any auto-merge predicate. Treat the small numeric deltas as measurement noise, not a contradiction, and cite whichever pass's number is closer to what CI shows at proposal-writing time. What follows is only the genuinely **new** material from the second pass, not yet in §9-11.
+A second, independently-run set of agents re-covered the structure/AGENTS.md and dependency/CI ground in §8-10 using a slightly different methodology (e.g. full `./...` vs `./pkg/...`-scoped build-graph, 54 vs 55 conformance jobs, 51 vs 52 counted suite dirs). Where the two passes overlap, **conclusions matched despite different exact intermediate numbers** — e.g. both independently found ~290-range total conformance runner-jobs, both independently found the same 2 orphan suites (`configs/`, `flags/`), both independently found Dependabot's real problem is review-latency not count, both independently found DEPENDENCY-POLICY.md's language conflicts with any auto-merge predicate. Treat the small numeric deltas as measurement noise, not a contradiction, and cite whichever pass's number is closer to what CI shows at proposal-writing time. What follows is only the genuinely **new** material from the second pass, not yet in §8-10.
 
-### 13.1 Real maintainer-domain routing table (OWNERS.md, not MAINTAINERS.md)
+### 12.1 Real maintainer-domain routing table (OWNERS.md, not MAINTAINERS.md)
 
 `MAINTAINERS.md` and `GOVERNANCE.md` are both one-line pointers to `kyverno/community` — no local content. The actual roster with area ownership lives in **`OWNERS.md`**: 9 Maintainers with named domains (Jim Bugwadia — Validation/CLI/Docs; Shuting Zhao — Engine/Admission/Background/Mutation/Events; Charles-Edouard Brétéché — Engine/CEL/Autogen/Validation/CLI/Helm; Vishal Choudhary — Engine/Image Verification; Mariam Fahmy — Generation/Admission Policy/Policy Exception; Frank Jogeleit — Cleanup/Reporting/Metrics/Testing; Liang Deng — Pod Security Admission; Yugandhar Suthari — Global Context/CLI; Xu Liu — Global Context/CEL Validation), plus 1 Reviewer (Ammar Yasser — CEL, Reporting; reviewer tier, not maintainer/approver). This is a real, two-tier, domain-scoped routing table that already exists and is more precise than CODEOWNERS — a reviewer-suggestion agent should route by this table for CEL/engine/image-verification changes specifically, falling back to CODEOWNERS' generic team ping only outside these named domains.
 
-### 13.2 CODEOWNERS gaps beyond the 3 dead lines already found in §9.2
+### 12.2 CODEOWNERS gaps beyond the 3 dead lines already found in §8.2
 
-Cross-referencing all 23 real CODEOWNERS path lines against the churn ranking in §9.3 surfaces **4 more high-churn directories with zero coverage at all** (falling to the bare `*` wildcard, not even a broad-prefix match): `pkg/controllers/` (303 churn — the correctly-spelled plural dir; its only near-match is the dead singular typo from §9.2), `pkg/image/` (175 churn — arguably the single most security-sensitive directory in the repo, image signature verification, with zero named-owner routing), `pkg/clients/` (225 churn, client wrappers — distinct from the generated `pkg/client/` singular, which is expected to be uncovered), and `config/` (config/crds 99 churn). An AI reviewer-router relying on CODEOWNERS alone would silently fall back to the generic core-maintainers team for exactly the areas that most need a named owner.
+Cross-referencing all 23 real CODEOWNERS path lines against the churn ranking in §8.3 surfaces **4 more high-churn directories with zero coverage at all** (falling to the bare `*` wildcard, not even a broad-prefix match): `pkg/controllers/` (303 churn — the correctly-spelled plural dir; its only near-match is the dead singular typo from §8.2), `pkg/image/` (175 churn — arguably the single most security-sensitive directory in the repo, image signature verification, with zero named-owner routing), `pkg/clients/` (225 churn, client wrappers — distinct from the generated `pkg/client/` singular, which is expected to be uncovered), and `config/` (config/crds 99 churn). An AI reviewer-router relying on CODEOWNERS alone would silently fall back to the generic core-maintainers team for exactly the areas that most need a named owner.
 
-### 13.3 Generated-code inventory, with precise counts
+### 12.3 Generated-code inventory, with precise counts
 
 Full census of tracked generated files: `zz_generated.{deepcopy,register}.go` — 14 files (7 API packages × 2); `pkg/client/**` — **178 files** (clientset/listers/informers/wrappers); `config/crds/**` — 21 manifests; the Helm CRDs subchart (`charts/kyverno/charts/crds/templates/**`) — 11 files, but **only 3 of the 4 API groups are mirrored there** (the CEL-based `policies.kyverno.io` CRDs are absent from this Helm subchart — worth flagging as a possible real gap, not just a doc gap); API reference HTML (`docs/user/crd/*.html`) — 11; CLI API docs (`docs/crd/v1/index.html`) — 1; Helm chart READMEs — 2; CLI command docs (`docs/user/cli/commands/*.md`) — ~25. **Total ≈263 tracked generated files**, none of which AGENTS.md currently states should never be hand-edited outside of `zz_generated.*` and `pkg/client/` — the CRD/doc outputs have the same rule implicitly but it's never written down.
 
-### 13.4 Concrete drafts: `agent-manifest.json` and `ai-maintainer.yaml`
+### 12.4 Concrete drafts: `agent-manifest.json` and `ai-maintainer.yaml`
 
-Both were fully drafted against real, grep-verified Makefile targets and Glob-verified paths (not invented): a `.github/agent-manifest.json` shape with `cmd`/`needs_cluster`/`approx_minutes`/`autofixable`/`verify` fields per target (covering build/fmt/codegen/test/kind/ko targets), and a `.github/ai-maintainer.yaml` split into `never_touch` (verified real paths: `pkg/image/verifiers/{cpol,ivpol}/{cosign,notary}/**`, `api/kyverno/v1/**`, `pkg/tls/**`, `pkg/utils/tls/**`, `charts/kyverno/templates/rbac/**`), `human_review_required` (other API versions, `pkg/engine`, `pkg/webhooks`, `pkg/cel`, `pkg/controllers`, `go.mod`/`go.sum`), and `agent_autonomous` (the generated paths from §13.3, dependency-bump PRs marked propose-only per DEPENDENCY-POLICY.md's maintainer-approval requirement). Full text of both drafts is in `lfx-research-raw-structure.md` §4-5 — ready to paste into a proposal or a pre-mentorship PR with minimal editing.
+Both were fully drafted against real, grep-verified Makefile targets and Glob-verified paths (not invented): a `.github/agent-manifest.json` shape with `cmd`/`needs_cluster`/`approx_minutes`/`autofixable`/`verify` fields per target (covering build/fmt/codegen/test/kind/ko targets), and a `.github/ai-maintainer.yaml` split into `never_touch` (verified real paths: `pkg/image/verifiers/{cpol,ivpol}/{cosign,notary}/**`, `api/kyverno/v1/**`, `pkg/tls/**`, `pkg/utils/tls/**`, `charts/kyverno/templates/rbac/**`), `human_review_required` (other API versions, `pkg/engine`, `pkg/webhooks`, `pkg/cel`, `pkg/controllers`, `go.mod`/`go.sum`), and `agent_autonomous` (the generated paths from §12.3, dependency-bump PRs marked propose-only per DEPENDENCY-POLICY.md's maintainer-approval requirement). Full text of both drafts is in `lfx-research-raw-structure.md` §4-5 — ready to paste into a proposal or a pre-mentorship PR with minimal editing.
 
-### 13.5 One more governance fact: two-tier structure constrains "agent-autonomous merge" more than DEPENDENCY-POLICY.md alone suggests
+### 12.5 One more governance fact: two-tier structure constrains "agent-autonomous merge" more than DEPENDENCY-POLICY.md alone suggests
 
-Beyond DEPENDENCY-POLICY.md's blanket "reviewed by maintainers" language (already flagged in §11.4 as conflicting with auto-merge), `OWNERS.md`'s Maintainer/Reviewer split (§13.1) means even "maintainer review" isn't uniform — a Reviewer-tier approval may not count as sufficient sign-off for a merge in the same way a Maintainer's does. Any auto-merge or reviewer-routing design should treat this as a second axis of the policy question in §11.4, not fold it into a single "human approved" boolean.
+Beyond DEPENDENCY-POLICY.md's blanket "reviewed by maintainers" language (already flagged in §10.4 as conflicting with auto-merge), `OWNERS.md`'s Maintainer/Reviewer split (§12.1) means even "maintainer review" isn't uniform — a Reviewer-tier approval may not count as sufficient sign-off for a merge in the same way a Maintainer's does. Any auto-merge or reviewer-routing design should treat this as a second axis of the policy question in §10.4, not fold it into a single "human approved" boolean.
