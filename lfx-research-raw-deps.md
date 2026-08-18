@@ -157,3 +157,13 @@ function should_auto_merge(pr):
 ## Cross-cutting note (docs-drift pattern)
 
 DEPENDENCY-POLICY.md's own workflow filenames are stale (says `trivy.yaml`/`trivy-periodic-scan.yaml`/`lint.yaml`/`scorecard.yaml`; actual files are `scan-trivy.yaml`/`periodic-trivy.yaml`/`check-golangci-lint.yaml`/`scan-scorecard.yaml`), same pattern as 3 dead CODEOWNERS path rules found in the structure-cluster research. This is a repo-wide pattern, not a one-off.
+
+## 9. Open questions for maintainers (Dependency PR Handling)
+
+Raised rather than assumed, because #1 is a genuine conflict with a written policy, not a judgment call I should make unilaterally.
+
+1. **`DEPENDENCY-POLICY.md` says every update is "reviewed by maintainers and must pass CI before merging"** — with no low-risk carve-out. Auto-merging patch bumps contradicts the literal sentence even if it fits the intent. Does "reviewed" mean a human click, or would a policy-as-code gate satisfy it for a defined subset? If the latter, adopting this should come with a PR editing that doc — not a quiet divergence from it.
+2. Start auto-merge on `github-actions` only (lower blast radius, CI-only impact) before touching `gomod`?
+3. What CVE severity should hard-block a merge versus just flag it for review?
+4. `.ko.yaml`'s base image (`ghcr.io/wolfi-dev/static:alpine`) is on a floating tag today, not a digest (see §8) — is pinning to digest wanted, or is that deliberate?
+5. Who may apply the kill-switch `hold` label — any maintainer, or a named role from `OWNERS.md`?
